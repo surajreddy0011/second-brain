@@ -13,6 +13,7 @@ everything into one file.
 """
 
 from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -21,7 +22,16 @@ from . import models  # noqa: F401 — importing registers the models with Base
 from .routers import auth as auth_router
 from .routers import notes as notes_router
 from .routers import chat as chat_router
+
 app = FastAPI(title="Second Brain API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # The pgvector extension has to be turned on per-database — it's installed
 # on the Postgres server, but not active in "second_brain" until we say so.

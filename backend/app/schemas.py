@@ -56,8 +56,14 @@ class NoteOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+class ChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+
 class ChatRequest(BaseModel):
     question: str
+    history: List[ChatMessage] = []  # recent turns, so follow-ups have context
 
 
 class ChatResponse(BaseModel):
