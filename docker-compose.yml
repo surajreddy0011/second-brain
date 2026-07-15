@@ -1,0 +1,31 @@
+# Runs a local PostgreSQL database with the pgvector extension pre-installed.
+# We use pgvector/pgvector image specifically because plain postgres doesn't
+# support storing/searching embedding vectors — this image adds that.
+#
+# Run with: docker compose up -d
+# Stop with: docker compose down
+# Wipe data and start fresh: docker compose down -v
+
+version: "3.9"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: second_brain_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: second_brain
+    ports:
+      - "5544:5432"
+    volumes:
+      - second_brain_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  second_brain_data:
