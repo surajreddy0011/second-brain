@@ -25,9 +25,13 @@ from .routers import chat as chat_router
 
 app = FastAPI(title="Second Brain API")
 
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://second-brain-frontend-suraj-2026.s3-website-us-east-1.amazonaws.com",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

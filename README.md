@@ -1,56 +1,98 @@
-# Second Brain — Day 1: Setup + Data Model
+# Second Brain
 
-## What exists so far
-- `backend/app/database.py` — connects to Postgres via SQLAlchemy
-- `backend/app/models.py` — three tables: `users`, `notes`, `note_chunks`
-- `backend/app/main.py` — FastAPI app with a `/health` endpoint
-- `docker-compose.yml` — runs Postgres (with pgvector) locally in a container
+A full-stack, AI-powered personal knowledge base. Write notes, then ask questions about them in natural language — the app retrieves relevant notes by *meaning* (not keyword matching) and generates grounded answers using retrieval-augmented generation (RAG).
 
-## Run it yourself
+Built end-to-end to develop hands-on depth in backend architecture, authentication, applied AI, and cloud deployment — every feature was built, debugged, and deployed personally rather than scaffolded from a template.
 
-You'll need: Python 3.11+, Docker Desktop installed and running.
+## What it does
 
-```bash
-# 1. Start the database
-docker compose up -d
+- Create, edit, and delete notes through a clean web UI
+- Ask questions about your notes in a chat interface
+- Answers are grounded only in your own notes (with source attribution), and the assistant says when it doesn't know instead of guessing
+- Follow-up questions work naturally — the chat retains conversation context
+- Notes with relative dates ("renew by tomorrow") are reasoned about relative to when the note was written, not when the question is asked
 
-# 2. Set up the backend
-cd backend
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+## Architecture
 
-# 3. Set up your environment file
-cp .env.example .env
-# (defaults work as-is for local dev, no editing needed yet)
-
-# 4. Run the server
-uvicorn app.main:app --reload
+```
+Browser
+  │
+  ├──►  React (TypeScript) frontend  ──  hosted on AWS S3
+  │
+  └──►  FastAPI backend  ──  deployed on AWS Elastic Beanstalk (EC2)
+              │
+              └──►  PostgreSQL + pgvector  ──  AWS RDS
+              │
+              └──►  OpenAI API  (embeddings + chat completions)
 ```
 
-Now open **http://localhost:8000/health** in your browser.
-You should see: `{"status":"ok","database":"connected"}`
+**Write path:** a note is saved → split into overlapping chunks → each chunk embedded (`text-embedding-3-small`) → stored as a vector in Postgres via `pgvector`.
 
-If you see that, your entire chain works: FastAPI server → SQLAlchemy →
-Postgres → pgvector extension, all talking to each other correctly.
+**Ask path:** the question is embedded the same way → Postgres finds the closest chunks by cosine similarity, scoped to the logged-in user → the top matches plus recent chat history are sent to `gpt-4o-mini` to generate a grounded answer.
 
-Also check **http://localhost:8000/docs** — FastAPI auto-generates
-interactive API documentation from your code. This becomes very useful
-once we add real endpoints on Day 5-6.
+## Tech stack
 
-## Troubleshooting
-- `connection refused` on `/health` → is `docker compose up -d` still running? Check with `docker ps`.
-- `password authentication failed` → delete the Docker volume and restart: `docker compose down -v && docker compose up -d`
-- `ModuleNotFoundError` → did you activate the venv before `pip install`?
+| Layer | Technology |
+|---|---|
+| Frontend | React, TypeScript, Vite |
+| Backend | FastAPI (Python), SQLAlchemy |
+| Database | PostgreSQL + pgvector extension |
+| Auth | JWT (python-jose), bcrypt password hashing |
+| AI | OpenAI embeddings + chat completions (RAG) |
+| Cloud | AWS Elastic Beanstalk (EC2), RDS, S3 |
+| Local dev | Docker (Postgres + pgvector) |
 
-## Why these 3 tables and not fewer?
-- `users` / `notes`: standard one-to-many — one user owns many notes.
-- `note_chunks`: separated from `notes` on purpose. A long note gets
-  split into smaller chunks later (Day 7-8) so the RAG chatbot can
-  retrieve just the relevant paragraph instead of dumping your entire
-  note history into every AI prompt (which would be slow and expensive).
+## Key implementation details
 
-## Next: Day 3-4 — Authentication
-We'll add password hashing, JWT token issuing, and login/signup
-endpoints — and importantly, *why* each piece exists, not just the code
-to make it work.
+- **Real authentication** — passwords are bcrypt-hashed, never stored or logged in plaintext; JWTs are verified on every protected request via a FastAPI dependency.
+- **Ownership-scoped access control** — every notes/chat query is filtered by the authenticated user's ID at the database level. Requesting another user's note by ID returns 404, not their data.
+- **RAG grounding** — the system prompt constrains the model to answer only from retrieved notes and to admit when information is absent, rather than hallucinating a plausible answer.
+- **Conversation-aware retrieval** — recent chat history is passed to the model so follow-ups ("what date?") resolve correctly instead of being treated as isolated queries.
+- **Deployed to AWS** — backend on Elastic Beanstalk, managed Postgres on RDS with pgvector enabled, static frontend on S3, with security groups locking database access to the application tier.
+
+## Running it locally
+
+Requires Docker, Python 3.9+, and Node 18+.
+
+```bash
+# 1. Start Postgres (with pgvector)
+docker compose up -d
+
+# 2. Backend
+cd backend
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # then fill in OPENAI_API_KEY and JWT_SECRET_KEY
+uvicorn app.main:app --reload
+
+# 3. Frontend (separate terminal)
+cd frontend
+npm install
+npm run dev
+```
+
+Backend runs at `localhost:8000` (interactive API docs at `/docs`), frontend at `localhost:5173`.
+
+## API overview
+
+| Endpoint | Description |
+|---|---|
+| `POST /auth/signup` | Create an account |
+| `POST /auth/login` | Log in, receive a JWT |
+| `GET /auth/me` | Get the current authenticated user |
+| `GET /notes` / `POST /notes` | List / create notes |
+| `GET /notes/{id}` / `PUT /notes/{id}` / `DELETE /notes/{id}` | Manage a single note |
+| `POST /chat` | Ask a question, get a RAG-grounded answer with sources |
+
+## Deployment notes
+
+The backend is packaged for Elastic Beanstalk (`Procfile` + `.ebextensions`), configured to run under uvicorn. Secrets (database URL, OpenAI key, JWT secret) are injected as environment variables rather than committed to source. The RDS instance runs single-AZ on a burstable instance class to stay within a small budget; the pgvector extension is enabled on first boot.
+
+> Live AWS resources for this project are spun down between demos to control cost. The full stack redeploys from this repo via the Elastic Beanstalk CLI plus an RDS instance.
+
+## Roadmap
+
+- [ ] HTTPS + CDN via CloudFront
+- [ ] CI/CD via GitHub Actions
+- [ ] Similarity-threshold filtering on retrieval (currently always returns top-k)
+- [ ] Persist chat history server-side (currently per-session)
